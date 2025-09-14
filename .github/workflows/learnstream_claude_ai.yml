@@ -1,15 +1,20 @@
-name: _app_token_probe
+name: _app_probe_full
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - name: Banner
         run: |
-          echo "=== APP TOKEN PROBE === $(date -u +%FT%TZ)"
+          echo "=== APP PROBE FULL === $(date -u +%FT%TZ)"
+          echo "Repo: $GITHUB_REPOSITORY"
+          echo "Ref:  $GITHUB_REF"
+
+      - name: Show IDs (masked by GitHub)
+        run: |
           echo "App ID: ${{ secrets.CLAUDE_AI_APP_ID }}"
           echo "Installation ID: ${{ secrets.CLAUDE_AI_INSTALLATION_ID }}"
 
@@ -25,15 +30,12 @@ jobs:
       - name: Token sanity (no leak)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GH_CI: "true"
-          GH_PAGER: ""
         run: |
           set -euo pipefail
-          # prove token exists without printing it
           test -n "$GH_TOKEN" || { echo "ERROR: minted token is empty"; exit 1; }
           echo "Minted token length: $(printf %s "$GH_TOKEN" | wc -c)"
 
-      - name: Call /rate_limit with minted token (20s timeout)
+      - name: Call /rate_limit (20s timeout)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_CI: "true"
@@ -44,3 +46,37 @@ jobs:
           timeout 20s gh api /rate_limit >/dev/null || { echo "rate_limit failed (bad token / permissions)"; exit 1; }
           echo "rate_limit OK"
           echo "::endgroup::"
+
+      - name: Check repo access with minted token (20s timeout)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_CI: "true"
+          GH_PAGER: ""
+        run: |
+          set -euo pipefail
+          echo "Testing repo access: $GITHUB_REPOSITORY"
+          timeout 20s gh api "repos/$GITHUB_REPOSITORY" >/dev/null \
+            || { echo "Installation token cannot access $GITHUB_REPOSITORY (installation scope or permissions)"; exit 1; }
+          echo "Repo access OK."
+
+      # ----- OPTIONAL WRITE CHECK (disabled by default) -----
+      # This proves the token can perform a write via the API.
+      # Uncomment to try adding a reaction to the latest commit status (harmless).
+      #
+      # - name: Optional: harmless write probe
+      #   if: ${{ false }}
+      #   env:
+      #     GH_TOKEN: ${{ steps.app-token.outputs.token }}
+      #     GH_CI: "true"
+      #     GH_PAGER: ""
+      #   run: |
+      #     set -euo pipefail
+      #     sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" -q .sha)
+      #     echo "Latest SHA: $sha"
+      #     # Try to list commit comments (read) and then post a reaction to the run (write-like)
+      #     gh api "repos/$GITHUB_REPOSITORY/commits/$sha/comments" >/dev/null
+      #     echo "Read OK. Skipping write by default."
+      #     # Example write (disabled): gh api -X POST "repos/$GITHUB_REPOSITORY/issues/1/reactions" -f content="+1" -H "Accept: application/vnd.github.squirrel-girl-preview+json"
+
+      - name: Done
+        run: echo "APP PROBE FULL completed successfully."

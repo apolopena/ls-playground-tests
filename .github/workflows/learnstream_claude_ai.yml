@@ -34,8 +34,9 @@ jobs:
         uses: tibdex/github-app-token@v2
         with:
           app_id: ${{ secrets.CLAUDE_AI_APP_ID }}
-          installation_id: ${{ secrets.CLAUDE_AI_INSTALLATION_ID }}
-          private_key: ${{ secrets.CLAUDE_AI_INSTALLATION_ID }}
+          private_key: ${{ secrets.CLAUDE_AI_APP_PRIVATE_KEY }}
+          installation_retrieval_mode: id
+          installation_retrieval_payload: ${{ secrets.CLAUDE_AI_INSTALLATION_ID }}
 
       - name: Compute target repo
         id: target

@@ -4,21 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "open-issue | pr-comment | issue-comment"
+        description: "open-issue | pr-comment | issue-comment | pr-code"
         required: true
         type: choice
-        options: [open-issue, pr-comment, issue-comment]
+        options: [open-issue, pr-comment, issue-comment, pr-code]
       target_repo:
         description: "owner/repo (defaults to current)"
         required: false
       number:
-        description: "PR/Issue number (for comments)"
+        description: "PR/Issue number (for comments/code)"
         required: false
       title:
         description: "Title (for open-issue)"
         required: false
       body:
-        description: "Body text (markdown)"
+        description: "Body text (markdown/code)"
         required: false
 
 jobs:
@@ -58,7 +58,7 @@ jobs:
           else
             echo "repo=${{ github.event.inputs.target_repo }}" >> "$GITHUB_OUTPUT"
           fi
-          echo "Using repo: ${{ github.repository }}"  # just a banner; actual value is in outputs
+          echo "Using repo: ${{ steps.target.outputs.repo }}"
 
       - name: "Sanity: token + repo visibility (20s each)"
         shell: bash
@@ -68,21 +68,20 @@ jobs:
         run: |
           set -euo pipefail
           echo "::group::rate_limit"
-          timeout 20s curl -fsS -H "Authorization: token ${TOKEN}" https://api.github.com/rate_limit > /dev/null \
+          timeout 20s curl -fsS -H "Authorization: token $TOKEN" https://api.github.com/rate_limit > /dev/null \
             || { echo "rate_limit check failed"; exit 1; }
           echo "rate_limit OK"
           echo "::endgroup::"
-
           echo "::group::repo GET"
           CODE=$(timeout 20s curl -fsS -o /tmp/repo.json -w "%{http_code}" \
-            -H "Authorization: token ${TOKEN}" \
+            -H "Authorization: token $TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}") || { echo "curl error repos/${REPO}"; exit 1; }
+            "https://api.github.com/repos/$REPO") || { echo "curl error repos/$REPO"; exit 1; }
           echo "HTTP $CODE"; head -c 300 /tmp/repo.json || true; echo
-          [ "$CODE" = "200" ] || { echo "Installation token cannot access ${REPO}"; exit 1; }
+          [ "$CODE" = "200" ] || { echo "Installation token cannot access $REPO"; exit 1; }
           echo "::endgroup::"
 
-      - name: Dispatch action (open-issue / pr-comment / issue-comment)
+      - name: Dispatch action (open-issue / pr-comment / issue-comment / pr-code)
         shell: bash
         env:
           TOKEN: ${{ steps.app-token.outputs.token }}
@@ -96,56 +95,61 @@ jobs:
           set -euo pipefail
           echo "Dispatching action: $ACT"
 
-          # Build provenance block safely (no NUL-delimiter read; works with set -e)
+          # Build provenance block without timestamp/helper
           PVT="$(cat <<'EOF'
           <!-- AI-PROVENANCE: DO NOT EDIT -->
           assistant: Claude AI
           requested-by: @__ACTOR__
-          helper: gh-actions
-          timestamp: __TIMESTAMP__
           EOF
           )"
-          # Inject actor and timestamp placeholders
           PVT="${PVT/__ACTOR__/${ACTOR}}"
-          PVT="${PVT/__TIMESTAMP__/$(date -u +%FT%TZ)}"
 
           case "$ACT" in
             open-issue)
-              if [ -z "${TITLE}" ]; then echo "Missing 'title' for open-issue"; exit 1; fi
+              [ -z "${TITLE}" ] && { echo "Missing 'title' for open-issue"; exit 1; }
               payload=$(jq -nc \
                 --arg title "$TITLE" \
                 --arg body  "$PVT\n\n${BODY:-}" \
                 --arg actor "$ACTOR" \
                 '{title:$title, body:$body, labels:["ai", ("by-" + $actor)]}')
-              echo "::group::POST /issues"
-              CODE=$(timeout 30s curl -fsS -o /tmp/out.json -w "%{http_code}" \
-                -X POST \
-                -H "Authorization: token ${TOKEN}" \
+              CODE=$(curl -fsS -o /tmp/out.json -w "%{http_code}" \
+                -X POST -H "Authorization: token ${TOKEN}" \
                 -H "Accept: application/vnd.github+json" \
                 -H "Content-Type: application/json" \
                 --data "$payload" \
-                "https://api.github.com/repos/${REPO}/issues") || { echo "curl error creating issue"; exit 1; }
-              echo "HTTP $CODE"; cat /tmp/out.json; echo
+                "https://api.github.com/repos/${REPO}/issues")
+              echo "HTTP $CODE"; cat /tmp/out.json
               [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ] || exit 1
-              echo "::endgroup::"
               ;;
 
             pr-comment|issue-comment)
-              if [ -z "${NUM}" ]; then echo "Missing 'number' for ${ACT}"; exit 1; fi
+              [ -z "${NUM}" ] && { echo "Missing 'number' for ${ACT}"; exit 1; }
               payload=$(jq -nc \
-                --arg b "(Claude AI) requested-by @${ACTOR} — $(date -u +%FT%TZ)\n\n${BODY:-}" \
+                --arg b "$PVT\n\n${BODY:-}" \
                 '{body:$b}')
-              echo "::group::POST /issues/$NUM/comments"
-              CODE=$(timeout 30s curl -fsS -o /tmp/out.json -w "%{http_code}" \
-                -X POST \
-                -H "Authorization: token ${TOKEN}" \
+              CODE=$(curl -fsS -o /tmp/out.json -w "%{http_code}" \
+                -X POST -H "Authorization: token ${TOKEN}" \
                 -H "Accept: application/vnd.github+json" \
                 -H "Content-Type: application/json" \
                 --data "$payload" \
-                "https://api.github.com/repos/${REPO}/issues/${NUM}/comments") || { echo "curl error posting comment"; exit 1; }
-              echo "HTTP $CODE"; cat /tmp/out.json; echo
+                "https://api.github.com/repos/${REPO}/issues/${NUM}/comments")
+              echo "HTTP $CODE"; cat /tmp/out.json
               [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ] || exit 1
-              echo "::endgroup::"
+              ;;
+
+            pr-code)
+              [ -z "${NUM}" ] && { echo "Missing 'number' for pr-code"; exit 1; }
+              payload=$(jq -nc \
+                --arg b "$PVT\n\n\`\`\`diff\n${BODY:-}\n\`\`\`" \
+                '{body:$b}')
+              CODE=$(curl -fsS -o /tmp/out.json -w "%{http_code}" \
+                -X POST -H "Authorization: token ${TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "Content-Type: application/json" \
+                --data "$payload" \
+                "https://api.github.com/repos/${REPO}/pulls/${NUM}/comments")
+              echo "HTTP $CODE"; cat /tmp/out.json
+              [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ] || exit 1
               ;;
 
             *)

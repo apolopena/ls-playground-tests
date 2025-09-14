@@ -1,0 +1,78 @@
+name: _exit_code_tracer
+on:
+  workflow_dispatch:
+    inputs:
+      custom_cmd:
+        description: 'Optional: a single shell command to run and trace'
+        required: false
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Banner
+        shell: bash
+        run: |
+          echo "=== EXIT CODE TRACER ==="
+          echo "Actor: ${{ github.actor }}"
+          echo "When:  $(date -u +%FT%TZ)"
+          echo "Repo:  $GITHUB_REPOSITORY"
+          echo "Ref:   $GITHUB_REF"
+
+      - name: Shell defaults (does bash have -e / pipefail?)
+        shell: bash
+        run: |
+          set
+          echo "Note: GitHub's default bash usually enables -e -o pipefail for steps."
+
+      - name: Sanity commands (no fail on error)
+        shell: bash
+        run: |
+          set +e
+          echo "--- uname -a"
+          uname -a; echo "rc=$?"
+          echo "--- date"
+          date; echo "rc=$?"
+          echo "--- which gh"
+          which gh || true; echo "rc=$?"
+          echo "--- gh --version"
+          gh --version 2>&1 || true; echo "rc=$?"
+          echo "--- which timeout"
+          which timeout || true; echo "rc=$?"
+          echo "--- timeout --version"
+          timeout --version 2>&1 || true; echo "rc=$?"
+          echo "--- curl --version"
+          curl --version 2>&1 || true; echo "rc=$?"
+          echo "--- jq --version"
+          jq --version 2>&1 || true; echo "rc=$?"
+          echo "Sanity block completed."
+
+      - name: Demonstrate handling of a failure without stopping job
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          echo "About to run a guaranteed failure: 'false'"
+          false
+          rc=$?
+          echo "Command: false ; rc=$rc"
+          # exit non-zero from this step (continue-on-error prevents job failure)
+          exit $rc
+
+      - name: Optional custom command (traced)
+        if: ${{ inputs.custom_cmd != '' }}
+        shell: bash
+        run: |
+          set +e
+          echo "Running custom command: ${{ inputs.custom_cmd }}"
+          eval "${{ inputs.custom_cmd }}"
+          rc=$?
+          echo "rc=$rc"
+          # Don't fail the job here; we just want to see the rc
+          exit 0
+
+      - name: Done
+        shell: bash
+        run: echo "Tracer finished OK."

@@ -1,0 +1,7 @@
++ set -eu
++ DEBUG=0
+++ command -v service
++ SERVICE=/usr/sbin/service
++ log_debug SERVICE=/usr/sbin/service
++ '[' 0 = 1 ']'
+exit=1

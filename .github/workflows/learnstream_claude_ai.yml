@@ -28,7 +28,22 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
+
     steps:
+      - name: Sanity banner
+        run: echo "=== Starting LearnStream Claude AI workflow ==="
+
+      - name: Sanity: secrets present (fail fast if missing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.CLAUDE_AI_APP_ID }}" ]; then echo "Missing secret: CLAUDE_AI_APP_ID"; exit 1; fi
+          if [ -z "${{ secrets.CLAUDE_AI_INSTALLATION_ID }}" ]; then echo "Missing secret: CLAUDE_AI_INSTALLATION_ID"; exit 1; fi
+          if [ -z "${{ secrets.CLAUDE_AI_APP_PRIVATE_KEY }}" ]; then echo "Missing secret: CLAUDE_AI_APP_PRIVATE_KEY"; exit 1; fi
+          echo "App ID: ${{ secrets.CLAUDE_AI_APP_ID }}"
+          echo "Installation ID: ${{ secrets.CLAUDE_AI_INSTALLATION_ID }}"
+          echo "Secrets are present (private key not shown)."
+
       - name: Mint installation token (GitHub App)
         id: app-token
         uses: tibdex/github-app-token@v2
@@ -40,67 +55,3 @@ jobs:
 
       - name: Compute target repo
         id: target
-        run: |
-          if [ -z "${{ github.event.inputs.target_repo }}" ]; then
-            echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
-          else
-            echo "repo=${{ github.event.inputs.target_repo }}" >> $GITHUB_OUTPUT
-          fi
-
-      # Debug step (added)
-      - name: Debug token + repo visibility
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GH_CI: "true"
-          GH_PAGER: ""
-          REPO: ${{ steps.target.outputs.repo }}
-        run: |
-          set -euo pipefail
-          echo "::group::rate_limit"
-          timeout 20s gh api /rate_limit || { echo "rate_limit check failed"; exit 1; }
-          echo "::endgroup::"
-          echo "::group::repo visibility"
-          timeout 20s gh api repos/$REPO >/dev/null || { echo "installation token cannot access $REPO"; exit 1; }
-          echo "repo access OK"
-          echo "::endgroup::"
-
-      - name: Open Issue
-        if: ${{ github.event.inputs.action == 'open-issue' }}
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ steps.target.outputs.repo }}
-        run: |
-          TITLE="${{ github.event.inputs.title }}"
-          BODY="${{ github.event.inputs.body }}"
-          if [ -z "$TITLE" ]; then echo "Missing title"; exit 1; fi
-          if [ -z "$BODY" ]; then BODY=""; fi
-          # Provenance header
-          PVT=$'<!-- AI-PROVENANCE: DO NOT EDIT -->\nassistant: Claude AI\nrequested-by: @'${{ github.actor }}$'\nhelper: gh-actions\ntimestamp: '$(date -u +%FT%TZ)
-          timeout 30s gh api repos/$REPO/issues \
-            -f title="$TITLE" \
-            -f labels="ai,by-${{ github.actor }}" \
-            -f body="$PVT\n\n$BODY"
-
-      - name: PR Comment
-        if: ${{ github.event.inputs.action == 'pr-comment' }}
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ steps.target.outputs.repo }}
-        run: |
-          NUM="${{ github.event.inputs.number }}"
-          BODY="${{ github.event.inputs.body }}"
-          if [ -z "$NUM" ]; then echo "Missing number"; exit 1; fi
-          if [ -z "$BODY" ]; then BODY=""; fi
-          timeout 30s gh api repos/$REPO/issues/$NUM/comments -f body="(Claude AI) requested-by @${{ github.actor }} — $(date -u +%FT%TZ)\n\n$BODY"
-
-      - name: Issue Comment
-        if: ${{ github.event.inputs.action == 'issue-comment' }}
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ steps.target.outputs.repo }}
-        run: |
-          NUM="${{ github.event.inputs.number }}"
-          BODY="${{ github.event.inputs.body }}"
-          if [ -z "$NUM" ]; then echo "Missing number"; exit 1; fi
-          if [ -z "$BODY" ]; then BODY=""; fi
-          timeout 30s gh api repos/$REPO/issues/$NUM/comments -f body="(Claude AI) requested-by @${{ github.actor }} — $(date -u +%FT%TZ)\n\n$BODY"

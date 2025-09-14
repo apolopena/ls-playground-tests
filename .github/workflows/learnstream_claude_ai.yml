@@ -94,14 +94,24 @@ jobs:
         run: |
           set -euo pipefail
           echo "Dispatching action: $ACT"
-          PVT=$'<!-- AI-PROVENANCE: DO NOT EDIT -->\nassistant: Claude AI\nrequested-by: @'"$ACTOR"$'\nhelper: gh-actions\ntimestamp: '$(date -u +%FT%TZ)
+
+          # Build provenance header safely (no YAML-breaking quotes)
+          read -r -d '' PVT <<EOF
+          <!-- AI-PROVENANCE: DO NOT EDIT -->
+          assistant: Claude AI
+          requested-by: @${ACTOR}
+          helper: gh-actions
+          timestamp: $(date -u +%FT%TZ)
+          EOF
 
           case "$ACT" in
             open-issue)
               if [ -z "${TITLE}" ]; then echo "Missing 'title' for open-issue"; exit 1; fi
-              payload=$(jq -nc --arg t "$TITLE" --arg b "$PVT\n\n${BODY:-}" \
-                          --argjson labels '["ai","by-'"$ACTOR"'"]' \
-                          '{title:$t, body:$b, labels:$labels}')
+              payload=$(jq -nc \
+                --arg title "$TITLE" \
+                --arg body  "$PVT\n\n${BODY:-}" \
+                --arg actor "$ACTOR" \
+                '{title:$title, body:$body, labels:["ai", ("by-" + $actor)]}')
               echo "::group::POST /issues"
               CODE=$(timeout 30s curl -sS -o /tmp/out.json -w "%{http_code}" \
                 -X POST \
@@ -117,7 +127,9 @@ jobs:
 
             pr-comment|issue-comment)
               if [ -z "${NUM}" ]; then echo "Missing 'number' for ${ACT}"; exit 1; fi
-              payload=$(jq -nc --arg b "(Claude AI) requested-by @$ACTOR — $(date -u +%FT%TZ)\n\n${BODY:-}" '{body:$b}')
+              payload=$(jq -nc \
+                --arg b "(Claude AI) requested-by @${ACTOR} — $(date -u +%FT%TZ)\n\n${BODY:-}" \
+                '{body:$b}')
               echo "::group::POST /issues/$NUM/comments"
               CODE=$(timeout 30s curl -sS -o /tmp/out.json -w "%{http_code}" \
                 -X POST \

@@ -33,7 +33,7 @@ jobs:
       - name: Sanity banner
         run: echo "=== Starting LearnStream Claude AI workflow ==="
 
-      - name: Sanity: secrets present (fail fast if missing)
+      - name: Sanity secrets present (fail fast if missing)
         shell: bash
         run: |
           set -euo pipefail

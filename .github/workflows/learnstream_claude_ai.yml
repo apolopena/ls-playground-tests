@@ -58,11 +58,20 @@ jobs:
           if [ -z "$TITLE" ]; then echo "Missing title"; exit 1; fi
           if [ -z "$BODY" ]; then BODY=""; fi
           # Provenance header
-          PVT=$'<!-- AI-PROVENANCE: DO NOT EDIT -->\nassistant: Claude AI\nrequested-by: @'${{ github.actor }}$'\nhelper: gh-actions\ntimestamp: '$(date -u +%FT%TZ)
-          gh api repos/$REPO/issues \
+          PVT="<!-- AI-PROVENANCE: DO NOT EDIT -->
+assistant: Claude AI
+requested-by: @${{ github.actor }}
+helper: gh-actions
+timestamp: $(date -u +%FT%TZ)"
+          if ! gh api repos/"$REPO"/issues \
             -f title="$TITLE" \
             -f labels="ai,by-${{ github.actor }}" \
-            -f body="$PVT\n\n$BODY"
+            -f body="$PVT
+
+$BODY"; then
+            echo "Failed to create issue"
+            exit 1
+          fi
 
       - name: PR Comment
         if: ${{ github.event.inputs.action == 'pr-comment' }}
@@ -74,7 +83,12 @@ jobs:
           BODY="${{ github.event.inputs.body }}"
           if [ -z "$NUM" ]; then echo "Missing number"; exit 1; fi
           if [ -z "$BODY" ]; then BODY=""; fi
-          gh api repos/$REPO/issues/$NUM/comments -f body="(Claude AI) requested-by @${{ github.actor }} — $(date -u +%FT%TZ)\n\n$BODY"
+          if ! gh api repos/"$REPO"/issues/"$NUM"/comments -f body="(Claude AI) requested-by @${{ github.actor }} — $(date -u +%FT%TZ)
+
+$BODY"; then
+            echo "Failed to create PR comment"
+            exit 1
+          fi
 
       - name: Issue Comment
         if: ${{ github.event.inputs.action == 'issue-comment' }}
@@ -86,4 +100,9 @@ jobs:
           BODY="${{ github.event.inputs.body }}"
           if [ -z "$NUM" ]; then echo "Missing number"; exit 1; fi
           if [ -z "$BODY" ]; then BODY=""; fi
-          gh api repos/$REPO/issues/$NUM/comments -f body="(Claude AI) requested-by @${{ github.actor }} — $(date -u +%FT%TZ)\n\n$BODY"
+          if ! gh api repos/"$REPO"/issues/"$NUM"/comments -f body="(Claude AI) requested-by @${{ github.actor }} — $(date -u +%FT%TZ)
+
+$BODY"; then
+            echo "Failed to create issue comment"
+            exit 1
+          fi

@@ -1,17 +1,46 @@
-name: Hello World App Debug
-
+name: _app_token_probe
 on:
   workflow_dispatch:
 
 jobs:
-  debug:
+  probe:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
       - name: Banner
-        run: echo "=== Hello World App Debug ==="
-
-      - name: Show IDs
         run: |
+          echo "=== APP TOKEN PROBE === $(date -u +%FT%TZ)"
           echo "App ID: ${{ secrets.CLAUDE_AI_APP_ID }}"
           echo "Installation ID: ${{ secrets.CLAUDE_AI_INSTALLATION_ID }}"
-          echo "Done."
+
+      - name: Mint installation token (GitHub App)
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.CLAUDE_AI_APP_ID }}
+          private_key: ${{ secrets.CLAUDE_AI_APP_PRIVATE_KEY }}
+          installation_retrieval_mode: id
+          installation_retrieval_payload: ${{ secrets.CLAUDE_AI_INSTALLATION_ID }}
+
+      - name: Token sanity (no leak)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_CI: "true"
+          GH_PAGER: ""
+        run: |
+          set -euo pipefail
+          # prove token exists without printing it
+          test -n "$GH_TOKEN" || { echo "ERROR: minted token is empty"; exit 1; }
+          echo "Minted token length: $(printf %s "$GH_TOKEN" | wc -c)"
+
+      - name: Call /rate_limit with minted token (20s timeout)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_CI: "true"
+          GH_PAGER: ""
+        run: |
+          set -euo pipefail
+          echo "::group::rate_limit"
+          timeout 20s gh api /rate_limit >/dev/null || { echo "rate_limit failed (bad token / permissions)"; exit 1; }
+          echo "rate_limit OK"
+          echo "::endgroup::"

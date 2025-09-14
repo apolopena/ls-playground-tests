@@ -29,6 +29,16 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      - name: Debug inputs
+        run: |
+          echo "Action: ${{ github.event.inputs.action }}"
+          echo "Target repo: ${{ github.event.inputs.target_repo }}"
+          echo "Number: ${{ github.event.inputs.number }}"
+          echo "Title: ${{ github.event.inputs.title }}"
+          echo "Body length: ${#BODY}"
+        env:
+          BODY: ${{ github.event.inputs.body }}
+
       - name: Mint installation token (GitHub App)
         id: app-token
         uses: tibdex/github-app-token@v2

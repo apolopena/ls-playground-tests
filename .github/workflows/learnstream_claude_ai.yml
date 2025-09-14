@@ -58,7 +58,7 @@ jobs:
           else
             echo "repo=${{ github.event.inputs.target_repo }}" >> "$GITHUB_OUTPUT"
           fi
-          echo "Using repo: ${{ steps.target.outputs.repo }}"
+          echo "Using repo: ${{ github.repository }}"  # just a banner; actual value is in outputs
 
       - name: "Sanity: token + repo visibility (20s each)"
         shell: bash
@@ -68,17 +68,18 @@ jobs:
         run: |
           set -euo pipefail
           echo "::group::rate_limit"
-          timeout 20s curl -sS -H "Authorization: token $TOKEN" https://api.github.com/rate_limit >/dev/null \
+          timeout 20s curl -fsS -H "Authorization: token ${TOKEN}" https://api.github.com/rate_limit > /dev/null \
             || { echo "rate_limit check failed"; exit 1; }
           echo "rate_limit OK"
           echo "::endgroup::"
+
           echo "::group::repo GET"
-          CODE=$(timeout 20s curl -sS -o /tmp/repo.json -w "%{http_code}" \
-            -H "Authorization: token $TOKEN" \
+          CODE=$(timeout 20s curl -fsS -o /tmp/repo.json -w "%{http_code}" \
+            -H "Authorization: token ${TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$REPO") || { echo "curl error repos/$REPO"; exit 1; }
+            "https://api.github.com/repos/${REPO}") || { echo "curl error repos/${REPO}"; exit 1; }
           echo "HTTP $CODE"; head -c 300 /tmp/repo.json || true; echo
-          [ "$CODE" = "200" ] || { echo "Installation token cannot access $REPO"; exit 1; }
+          [ "$CODE" = "200" ] || { echo "Installation token cannot access ${REPO}"; exit 1; }
           echo "::endgroup::"
 
       - name: Dispatch action (open-issue / pr-comment / issue-comment)
@@ -95,14 +96,18 @@ jobs:
           set -euo pipefail
           echo "Dispatching action: $ACT"
 
-          # Build provenance header safely (no YAML-breaking quotes)
-          read -r -d '' PVT <<EOF
+          # Build provenance block safely (no NUL-delimiter read; works with set -e)
+          PVT="$(cat <<'EOF'
           <!-- AI-PROVENANCE: DO NOT EDIT -->
           assistant: Claude AI
-          requested-by: @${ACTOR}
+          requested-by: @__ACTOR__
           helper: gh-actions
-          timestamp: $(date -u +%FT%TZ)
+          timestamp: __TIMESTAMP__
           EOF
+          )"
+          # Inject actor and timestamp placeholders
+          PVT="${PVT/__ACTOR__/${ACTOR}}"
+          PVT="${PVT/__TIMESTAMP__/$(date -u +%FT%TZ)}"
 
           case "$ACT" in
             open-issue)
@@ -113,13 +118,13 @@ jobs:
                 --arg actor "$ACTOR" \
                 '{title:$title, body:$body, labels:["ai", ("by-" + $actor)]}')
               echo "::group::POST /issues"
-              CODE=$(timeout 30s curl -sS -o /tmp/out.json -w "%{http_code}" \
+              CODE=$(timeout 30s curl -fsS -o /tmp/out.json -w "%{http_code}" \
                 -X POST \
-                -H "Authorization: token $TOKEN" \
+                -H "Authorization: token ${TOKEN}" \
                 -H "Accept: application/vnd.github+json" \
                 -H "Content-Type: application/json" \
                 --data "$payload" \
-                "https://api.github.com/repos/$REPO/issues") || { echo "curl error creating issue"; exit 1; }
+                "https://api.github.com/repos/${REPO}/issues") || { echo "curl error creating issue"; exit 1; }
               echo "HTTP $CODE"; cat /tmp/out.json; echo
               [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ] || exit 1
               echo "::endgroup::"
@@ -131,13 +136,13 @@ jobs:
                 --arg b "(Claude AI) requested-by @${ACTOR} — $(date -u +%FT%TZ)\n\n${BODY:-}" \
                 '{body:$b}')
               echo "::group::POST /issues/$NUM/comments"
-              CODE=$(timeout 30s curl -sS -o /tmp/out.json -w "%{http_code}" \
+              CODE=$(timeout 30s curl -fsS -o /tmp/out.json -w "%{http_code}" \
                 -X POST \
-                -H "Authorization: token $TOKEN" \
+                -H "Authorization: token ${TOKEN}" \
                 -H "Accept: application/vnd.github+json" \
                 -H "Content-Type: application/json" \
                 --data "$payload" \
-                "https://api.github.com/repos/$REPO/issues/$NUM/comments") || { echo "curl error posting comment"; exit 1; }
+                "https://api.github.com/repos/${REPO}/issues/${NUM}/comments") || { echo "curl error posting comment"; exit 1; }
               echo "HTTP $CODE"; cat /tmp/out.json; echo
               [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ] || exit 1
               echo "::endgroup::"

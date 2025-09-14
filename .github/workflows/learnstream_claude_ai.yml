@@ -60,7 +60,7 @@ jobs:
           fi
           echo "Using repo: ${{ steps.target.outputs.repo }}"
 
-      - name: Sanity: token + repo visibility (20s each)
+      - name: "Sanity: token + repo visibility (20s each)"
         shell: bash
         env:
           TOKEN: ${{ steps.app-token.outputs.token }}
